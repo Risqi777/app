@@ -1,0 +1,161 @@
+{
+  "project_title": "Sistem Manajemen Jadwal Shift & Hak Cuti Personil (16 Personil)",
+  "design_archetype": "Swiss & Corporate Precision (High Contrast & Operational Clarity)",
+  "language_context": "Indonesian Professional Workplace (Bahasa Indonesia UI)",
+  "typography": {
+    "font_family_heading": "Plus Jakarta Sans, sans-serif",
+    "font_family_body": "Inter, sans-serif",
+    "font_family_mono": "JetBrains Mono, monospace",
+    "google_fonts_cdn": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap",
+    "hierarchy": {
+      "h1_hero": "text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-slate-50",
+      "h2_section": "text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100",
+      "h3_subsection": "text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-200",
+      "card_title": "text-base font-semibold text-slate-900 dark:text-slate-100",
+      "body": "text-sm sm:text-base font-normal text-slate-600 dark:text-slate-300 leading-relaxed",
+      "table_cell": "text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200",
+      "badge_text": "text-[11px] font-bold tracking-wider uppercase"
+    }
+  },
+  "colors": {
+    "theme_type": "Light preferred default with full Dark Mode support toggle",
+    "background_light": "#F8FAFC",
+    "background_dark": "#0F172A",
+    "card_bg_light": "#FFFFFF",
+    "card_bg_dark": "#1E293B",
+    "primary": "#0284C7",
+    "primary_dark": "#0369A1",
+    "secondary": "#334155",
+    "border_light": "#E2E8F0",
+    "border_dark": "#334155",
+    "shift_badge_colors": {
+      "pagi": {
+        "label": "Shift Pagi (07.00 - 13.00)",
+        "code": "Pagi",
+        "bg_light": "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700",
+        "hex": "#D97706"
+      },
+      "siang": {
+        "label": "Shift Siang (13.00 - 19.00)",
+        "code": "Siang",
+        "bg_light": "bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-700",
+        "hex": "#0284C7"
+      },
+      "malam": {
+        "label": "Shift Malam (19.00 - 07.00)",
+        "code": "Malam",
+        "bg_light": "bg-indigo-100 text-indigo-900 border-indigo-300 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-700",
+        "hex": "#4F46E5"
+      },
+      "libur": {
+        "label": "Libur (Off)",
+        "code": "Libur",
+        "bg_light": "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700",
+        "hex": "#16A34A"
+      },
+      "cuti_tahunan": {
+        "label": "Cuti Tahunan",
+        "code": "Cuti",
+        "bg_light": "bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700",
+        "hex": "#E11D48"
+      },
+      "cuti_penting": {
+        "label": "Cuti Penting",
+        "code": "C. Penting",
+        "bg_light": "bg-pink-100 text-pink-900 border-pink-300 dark:bg-pink-950/60 dark:text-pink-300 dark:border-pink-700",
+        "hex": "#DB2777"
+      },
+      "cuti_besar": {
+        "label": "Cuti Besar",
+        "code": "C. Besar",
+        "bg_light": "bg-purple-100 text-purple-900 border-purple-300 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-700",
+        "hex": "#9333EA"
+      },
+      "sakit": {
+        "label": "Sakit",
+        "code": "Sakit",
+        "bg_light": "bg-orange-100 text-orange-900 border-orange-300 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-700",
+        "hex": "#EA580C"
+      },
+      "dinas_luar": {
+        "label": "Dinas Luar",
+        "code": "Dinas",
+        "bg_light": "bg-teal-100 text-teal-900 border-teal-300 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-700",
+        "hex": "#0D9488"
+      },
+      "diklat": {
+        "label": "Diklat",
+        "code": "Diklat",
+        "bg_light": "bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-cyan-950/60 dark:text-cyan-300 dark:border-cyan-700",
+        "hex": "#0891B2"
+      },
+      "penugasan": {
+        "label": "Penugasan",
+        "code": "Tugas",
+        "bg_light": "bg-slate-200 text-slate-900 border-slate-400 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600",
+        "hex": "#475569"
+      }
+    }
+  },
+  "layout_and_grid": {
+    "schedule_matrix": {
+      "container": "relative overflow-x-auto border rounded-xl shadow-sm bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800",
+      "sticky_column": "sticky left-0 z-20 bg-slate-50 dark:bg-slate-900/95 backdrop-blur-md border-r border-slate-200 dark:border-slate-800 min-w-[180px] p-3 shadow-[4px_0_12px_rgba(0,0,0,0.05)]",
+      "day_header_cell": "p-2 min-w-[48px] text-center text-xs font-semibold border-b border-r border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/80",
+      "shift_cell_button": "w-full h-11 flex flex-col items-center justify-center rounded-lg border text-xs font-bold transition-all duration-150 hover:scale-105 hover:shadow-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-sky-500"
+    },
+    "dashboard_stats_grid": "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6",
+    "printable_report_layout": "print:bg-white print:text-black print:p-8 print:shadow-none print:m-0"
+  },
+  "print_view_configuration": {
+    "header": {
+      "editable_fields": [
+        "Judul Laporan / Organisasi (Default: 'JADWAL SHIFT KERJA PERSONIL')",
+        "Sub-Judul / Nama Unit (Default: 'Daftar Penugasan Shift & Hak Cuti')",
+        "Logo Organisasi (Uploadable Image / Default Emblem)",
+        "Periode Bulan & Tahun (e.g., 'Agustus 2026')"
+      ]
+    },
+    "footer": {
+      "editable_fields": [
+        "Tempat & Tanggal Penetapan (e.g., 'Jakarta, 1 August 2026')",
+        "Jabatan Penandatangan (e.g., 'Kepala Unit / Admin Shift')",
+        "Nama Lengkap Penandatangan",
+        "NIK / NIP Penandatangan",
+        "Upload Gambar Tanda Tangan Digital"
+      ]
+    },
+    "print_styles": "@media print { .no-print { display: none !important; } .print-break-inside-avoid { break-inside: avoid; } body { background: white !important; font-size: 11pt; } .printable-container { width: 100% !important; margin: 0 !important; padding: 0 !important; } }"
+  },
+  "image_urls": {
+    "default_logo": "https://images.unsplash.com/photo-1582601231162-132ca60713d6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHxpbmRvbmVzaWFuJTIwY29ycG9yYXRlJTIwb2ZmaWNlJTIwdGVhbSUyMGFkbWluaXN0cmF0aXZlJTIwcHJvZmVzc2lvbmFsfGVufDB8fHx8MTc4ODQ0NDAyMnww&ixlib=rb-4.1.0&q=85",
+    "default_signature": "https://images.unsplash.com/photo-1592220769343-8a128527c5f1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwyfHxpbmRvbmVzaWFuJTIwY29ycG9yYXRlJTIwb2ZmaWNlJTIwdGVhbSUyMGFkbWluaXN0cmF0aXZlJTIwcHJvZmVzc2lvbmFsfGVufDB8fHx8MTc4ODQ0NDAyMnww&ixlib=rb-4.1.0&q=85",
+    "avatar_placeholder_team": "https://images.unsplash.com/photo-1672917187338-7f81ecac3d3f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwxfHxpbmRvbmVzaWFuJTIwY29ycG9yYXRlJTIwb2ZmaWNlJTIwdGVhbSUyMGFkbWluaXN0cmF0aXZlJTIwcHJvZmVzc2lvbmFsfGVufDB8fHx8MTc4ODQ0NDAyMnww&ixlib=rb-4.1.0&q=85"
+  },
+  "testing_and_accessibility": {
+    "required_data_testids": [
+      "data-testid='login-email-input'",
+      "data-testid='login-nik-input'",
+      "data-testid='login-password-input'",
+      "data-testid='login-submit-button'",
+      "data-testid='register-nav-link'",
+      "data-testid='role-switcher-badge'",
+      "data-testid='auto-generate-schedule-button'",
+      "data-testid='export-pdf-button'",
+      "data-testid='add-personil-button'",
+      "data-testid='submit-request-leave-button'",
+      "data-testid='shift-cell-Pagi'",
+      "data-testid='shift-cell-Siang'",
+      "data-testid='shift-cell-Malam'",
+      "data-testid='shift-cell-Libur'",
+      "data-testid='save-settings-button'"
+    ]
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Always set data-testid on interactive elements, buttons, inputs, tabs, and status badges.",
+    "Do not use dark colors as heavy full-page gradients. Use subtle clean slate backgrounds with sharp 1px borders.",
+    "Ensure all schedule cells have high contrast text matching their specific shift colors.",
+    "Support both mobile-responsive view (cards/list view per day) and desktop matrix grid view.",
+    "Include local state persistence or mock API store so data created in Admin (new personil, leaves, custom logo) reflects instantly."
+  ]
+}
