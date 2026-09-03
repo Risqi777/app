@@ -70,6 +70,12 @@ body {
 .schedule-cell { transition: transform 120ms ease, box-shadow 120ms ease; }
 .schedule-cell:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,0.08); }
 
+@keyframes wiggle {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-14deg); }
+    75% { transform: rotate(14deg); }
+}
+
 /* Print */
 @media print {
     .no-print { display: none !important; }

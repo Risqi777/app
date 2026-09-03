@@ -555,8 +555,48 @@ async def create_request(body: RequestCreateIn, user: dict = Depends(get_current
         "decided_at": None,
     }
     await db.requests.insert_one(doc)
+    # Notify all admins
+    admins = await db.users.find({"role": "admin", "active": True}, {"_id": 0, "id": 1}).to_list(100)
+    if admins:
+        notifs = [{
+            "id": new_id(),
+            "user_id": a["id"],
+            "type": "new_request",
+            "title": f"Pengajuan {body.type} baru",
+            "message": f"{user['name']} mengajukan {body.type} ({body.start_date} → {body.end_date})",
+            "ref_id": doc["id"],
+            "ref_route": "/requests",
+            "read": False,
+            "created_at": now_iso(),
+        } for a in admins]
+        await db.notifications.insert_many(notifs)
     doc.pop("_id", None)
     return doc
+
+# ============= Notifications =============
+@api.get("/notifications")
+async def list_notifications(limit: int = 30, user: dict = Depends(get_current_user)):
+    docs = await db.notifications.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(limit)
+    unread = await db.notifications.count_documents({"user_id": user["id"], "read": False})
+    return {"items": docs, "unread": unread}
+
+@api.patch("/notifications/{notif_id}/read")
+async def mark_read(notif_id: str, user: dict = Depends(get_current_user)):
+    res = await db.notifications.update_one(
+        {"id": notif_id, "user_id": user["id"]}, {"$set": {"read": True}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notifikasi tidak ditemukan")
+    return {"ok": True}
+
+@api.post("/notifications/read-all")
+async def mark_all_read(user: dict = Depends(get_current_user)):
+    res = await db.notifications.update_many(
+        {"user_id": user["id"], "read": False}, {"$set": {"read": True}}
+    )
+    return {"ok": True, "updated": res.modified_count}
 
 @api.patch("/requests/{req_id}")
 async def decide_request(req_id: str, body: RequestDecisionIn, admin: dict = Depends(require_admin)):

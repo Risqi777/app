@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 4 backend testing complete. All 31 pytest tests pass (100%), including 8 new tests for in-app notifications: (a) personil POST /api/requests inserts one notification per admin with type=new_request, ref_id=request.id, ref_route=/requests, read=false, and message containing personil name + both dates; (b) GET /api/notifications is filtered by current user_id (personil does not see admin notifications); (c) PATCH /api/notifications/{id}/read persists read=true; (d) PATCH by wrong owner returns 404; (e) unauth PATCH returns 401/403; (f) POST /api/notifications/read-all returns {ok:true, updated:N>=1} and unread drops to 0; (g) admin-self-created request still creates admin notification; (h) both notification endpoints require auth. All previous 23 regression tests still pass (auth, personil CRUD, schedule generate/cell/audit/summary, requests decide with conflict/force including Penugasan bypass and reject path, settings CRUD/min_active_per_shift, stats).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration_4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Notifications endpoint uses to_list(limit) but sort is applied before to_list — correct. However, GET /api/notifications has no pagination cursor; if a user accumulates thousands of notifications the default limit=30 is fine but there is no way to page beyond 30 except by increasing limit. Consider adding since_ts / offset if history view is added.",
+    "create_request loads all admins via find(...).to_list(100) — hard cap 100 admins. Realistic today but note if org grows.",
+    "PATCH /api/notifications/{id}/read returns {ok:true} even when the notification was already read (matched_count>0, modified_count may be 0). Fine for idempotency but not distinguishable in response.",
+    "The message text embeds request type and dates via Indonesian string with →; ensure email/UTF handling on frontend renders correctly (verified in-DB stored properly).",
+    "Notifications collection is unindexed on (user_id, created_at, read). For scale, add compound index {user_id:1, read:1, created_at:-1}.",
+    "server.py now ~793 lines — still over 700-line split threshold. Suggest routers/notifications.py.",
+    "First test run had 2 pre-existing test-data pollution failures in TestConflictAndForce (6 personil on Pagi 2026-03-10 leftover from prior iterations). Cleaned TEST_conf_* users/schedules/requests; consider adding a conftest.py session-scoped teardown to purge TEST_* prefixed data."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested (per request)"},
+  "test_credentials": "Admin: rsqikurniawan@gmail.com / NIK 1000000001 / Admin@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Cleaned 9 stale TEST_conf_* personil (129 schedules, 12 requests) before final run. Fresh personil created via /api/auth/register (session fixture) and 3 via /api/personil (class fixture) with unique NIK/email each run. Notifications inserted into db.notifications for admins.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 delta (notifications) fully verified with 8 new pytest cases in class TestNotifications. Tests use ordered methods (test_a..h) that share notif_id/req_id via class attributes. IMPORTANT: If TestConflictAndForce fails with 'expected 409 got 200', it's stale TEST_conf_* data on 2026-03-10..13. Clean up by deleting users where email regex ^test_conf_ (case-insensitive) plus their schedules/requests/notifications from mongo db (DB_NAME env). Consider adding a conftest.py autouse session cleanup.",
+  "rca of the issue": "N/A — no bugs found in iteration 4 delta. Initial 2 failures in TestConflictAndForce were due to stale seed data (6 personil on Pagi 2026-03-10 from earlier iterations vs expected 3), not iter-4 changes; resolved by DB cleanup."
+}

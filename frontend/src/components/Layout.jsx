@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Button } from "./ui/button";
 import { CalendarDays, Users, FileText, Settings as SettingsIcon, LogOut, LayoutDashboard, ClipboardList, BarChart3 } from "lucide-react";
 import { cn } from "../lib/utils";
+import NotificationBell from "./NotificationBell";
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -25,7 +26,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <aside className="fixed inset-y-0 left-0 hidden md:flex w-64 flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30">
-        <div className="h-16 px-5 flex items-center border-b border-slate-200 dark:border-slate-800">
+        <div className="h-16 px-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-sky-600 flex items-center justify-center">
               <CalendarDays className="w-5 h-5 text-white" />
@@ -35,6 +36,7 @@ export default function Layout() {
               <div className="text-[10px] uppercase tracking-widest text-slate-500">Personil 16</div>
             </div>
           </div>
+          <NotificationBell />
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {links.map((l) => (
@@ -80,7 +82,10 @@ export default function Layout() {
           </div>
           <span className="font-heading font-bold text-sm">Shift Scheduler</span>
         </div>
-        <Button size="sm" variant="ghost" onClick={handleLogout} data-testid="logout-button-mobile"><LogOut className="w-4 h-4" /></Button>
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          <Button size="sm" variant="ghost" onClick={handleLogout} data-testid="logout-button-mobile"><LogOut className="w-4 h-4" /></Button>
+        </div>
       </div>
       <nav className="md:hidden sticky top-14 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         <div className="flex gap-1 p-2 min-w-max">

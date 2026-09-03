@@ -410,3 +410,115 @@ class TestConflictAndForce:
                            json={"status": "rejected", "admin_note": "no"}, timeout=30)
         assert r.status_code == 200
         assert r.json()["status"] == "rejected"
+
+
+# ---------- Iteration 4: Notifications ----------
+class TestNotifications:
+    def test_a_personil_create_request_fires_admin_notification(self, admin_headers, personil, personil_headers):
+        # Get admin's unread before
+        before = requests.get(f"{BASE}/notifications", headers=admin_headers, timeout=15).json()
+        unread_before = before["unread"]
+
+        # personil creates a new request
+        payload = {"type": "Cuti Tahunan", "start_date": "2027-07-01",
+                   "end_date": "2027-07-03", "reason": "notif test"}
+        r = requests.post(f"{BASE}/requests", headers=personil_headers, json=payload, timeout=15)
+        assert r.status_code == 200, r.text
+        req_id = r.json()["id"]
+
+        # Admin should now have +1 unread; latest item references this req
+        after = requests.get(f"{BASE}/notifications", headers=admin_headers, timeout=15).json()
+        assert after["unread"] == unread_before + 1, f"unread did not increment: {unread_before}->{after['unread']}"
+        assert isinstance(after["items"], list) and len(after["items"]) >= 1
+        latest = after["items"][0]
+        assert latest["type"] == "new_request"
+        assert latest["ref_id"] == req_id
+        assert latest["ref_route"] == "/requests"
+        assert latest["read"] is False
+        # Message includes personil name and dates
+        assert personil["user"]["name"] in latest["message"]
+        assert "2027-07-01" in latest["message"] and "2027-07-03" in latest["message"]
+        # created_at desc: verify sort
+        if len(after["items"]) >= 2:
+            assert after["items"][0]["created_at"] >= after["items"][1]["created_at"]
+
+        # Save for later tests
+        TestNotifications._admin_notif_id = latest["id"]
+        TestNotifications._req_id = req_id
+
+    def test_b_personil_does_not_see_admin_notifications(self, personil_headers):
+        r = requests.get(f"{BASE}/notifications", headers=personil_headers, timeout=15)
+        assert r.status_code == 200
+        body = r.json()
+        # All items must belong to this personil; none should reference the new_request notif from test_a
+        for it in body["items"]:
+            assert it.get("type") != "new_request" or it.get("ref_id") != getattr(TestNotifications, "_req_id", None)
+
+    def test_c_patch_read_marks_notification_read(self, admin_headers):
+        nid = TestNotifications._admin_notif_id
+        r = requests.patch(f"{BASE}/notifications/{nid}/read", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+        # Verify persisted: fetch and find item with same id and read=true
+        got = requests.get(f"{BASE}/notifications?limit=100", headers=admin_headers, timeout=15).json()
+        item = next((x for x in got["items"] if x["id"] == nid), None)
+        assert item is not None
+        assert item["read"] is True
+
+    def test_d_patch_read_wrong_owner_returns_404(self, personil_headers):
+        nid = TestNotifications._admin_notif_id
+        r = requests.patch(f"{BASE}/notifications/{nid}/read", headers=personil_headers, timeout=15)
+        assert r.status_code == 404
+
+    def test_e_patch_read_requires_auth(self):
+        nid = TestNotifications._admin_notif_id
+        r = requests.patch(f"{BASE}/notifications/{nid}/read", timeout=15)
+        assert r.status_code in (401, 403)
+
+    def test_f_read_all_zeros_unread(self, admin_headers, personil_headers):
+        # Create another request to guarantee at least one unread admin notification
+        payload = {"type": "Sakit", "start_date": "2027-08-01",
+                   "end_date": "2027-08-01", "reason": "notif readall"}
+        r = requests.post(f"{BASE}/requests", headers=personil_headers, json=payload, timeout=15)
+        assert r.status_code == 200
+
+        before = requests.get(f"{BASE}/notifications", headers=admin_headers, timeout=15).json()
+        assert before["unread"] >= 1
+
+        r = requests.post(f"{BASE}/notifications/read-all", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["updated"] >= 1
+
+        after = requests.get(f"{BASE}/notifications", headers=admin_headers, timeout=15).json()
+        assert after["unread"] == 0
+
+    def test_g_admin_self_created_request_still_notifies(self, admin_headers):
+        # Reset by read-all first
+        requests.post(f"{BASE}/notifications/read-all", headers=admin_headers, timeout=15)
+        before = requests.get(f"{BASE}/notifications", headers=admin_headers, timeout=15).json()
+        assert before["unread"] == 0
+
+        # Admin creates a request
+        payload = {"type": "Diklat", "start_date": "2027-09-01",
+                   "end_date": "2027-09-01", "reason": "admin self"}
+        r = requests.post(f"{BASE}/requests", headers=admin_headers, json=payload, timeout=15)
+        assert r.status_code == 200
+
+        after = requests.get(f"{BASE}/notifications", headers=admin_headers, timeout=15).json()
+        # At least one admin notification should be created (creator is also an admin)
+        assert after["unread"] >= 1
+        # Latest should reference this request
+        latest = after["items"][0]
+        assert latest["ref_id"] == r.json()["id"]
+        assert latest["type"] == "new_request"
+
+    def test_h_notifications_requires_auth(self):
+        r = requests.get(f"{BASE}/notifications", timeout=15)
+        assert r.status_code in (401, 403)
+        r = requests.post(f"{BASE}/notifications/read-all", timeout=15)
+        assert r.status_code in (401, 403)
+
+
