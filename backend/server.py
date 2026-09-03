@@ -286,6 +286,7 @@ class RequestCreateIn(BaseModel):
 class RequestDecisionIn(BaseModel):
     status: Literal["approved", "rejected"]
     admin_note: Optional[str] = ""
+    force: bool = False  # Bypass minimum-active-shift conflict check
 
 class SettingsIn(BaseModel):
     title: Optional[str] = None
@@ -296,6 +297,7 @@ class SettingsIn(BaseModel):
     signer_jabatan: Optional[str] = None
     signer_nik: Optional[str] = None
     place: Optional[str] = None
+    min_active_per_shift: Optional[int] = None
 
 # ============= Auth =============
 @api.post("/auth/register")
@@ -458,6 +460,38 @@ async def get_audit(month: Optional[int] = None, year: Optional[int] = None,
     docs = await db.schedule_audit.find(q, {"_id": 0}).sort("changed_at", -1).to_list(limit)
     return docs
 
+@api.get("/schedule/summary")
+async def schedule_summary(month: int, year: int, user: dict = Depends(get_current_user)):
+    """Per-personil monthly counts for workload analysis."""
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(1000)
+    prefix = f"{year:04d}-{month:02d}-"
+    all_entries = await db.schedules.find(
+        {"date": {"$regex": f"^{prefix}"}}, {"_id": 0}
+    ).to_list(20000)
+    by_user = {}
+    for e in all_entries:
+        by_user.setdefault(e["user_id"], []).append(e)
+    n_days = days_in_month(year, month)
+    result = []
+    for u in users:
+        counts = {k: 0 for k in SHIFT_CODES}
+        for e in by_user.get(u["id"], []):
+            if e["shift"] in counts:
+                counts[e["shift"]] += 1
+        total_work = counts["Pagi"] + counts["Siang"] + counts["Malam"]
+        total_cuti = counts["Cuti Tahunan"] + counts["Cuti Penting"] + counts["Cuti Besar"]
+        total_absen = counts["Sakit"] + counts["Dinas Luar"] + counts["Diklat"] + counts["Penugasan"]
+        assigned = total_work + counts["Libur"] + total_cuti + total_absen
+        result.append({
+            "user_id": u["id"], "name": u["name"], "nik": u["nik"],
+            "jabatan": u.get("jabatan", ""), "role": u["role"], "active": u.get("active", True),
+            "counts": counts,
+            "total_work": total_work, "total_libur": counts["Libur"],
+            "total_cuti": total_cuti, "total_absen": total_absen,
+            "unassigned": max(0, n_days - assigned),
+        })
+    return {"month": month, "year": year, "days_in_month": n_days, "rows": result}
+
 @api.post("/schedule/generate")
 async def generate_schedule(body: GenerateIn, admin: dict = Depends(require_admin)):
     """Generate schedule using 3-day-work-then-2-day-off pattern with balanced Pagi/Siang/Malam rotation."""
@@ -529,6 +563,40 @@ async def decide_request(req_id: str, body: RequestDecisionIn, admin: dict = Dep
     req = await db.requests.find_one({"id": req_id})
     if not req:
         raise HTTPException(status_code=404, detail="Pengajuan tidak ditemukan")
+    # Conflict check on approval (skip if type is Penugasan since it still counts as work)
+    WORK_SHIFTS = {"Pagi", "Siang", "Malam"}
+    ABSENCE_TYPES = {"Cuti Tahunan", "Cuti Penting", "Cuti Besar", "Sakit", "Dinas Luar", "Diklat"}
+    conflicts = []
+    if body.status == "approved" and req["type"] in ABSENCE_TYPES and not body.force:
+        settings_doc = await db.settings.find_one({"id": "app_settings"}, {"_id": 0}) or {}
+        min_active = int(settings_doc.get("min_active_per_shift", 3) or 3)
+        start = datetime.strptime(req["start_date"], "%Y-%m-%d").date()
+        end = datetime.strptime(req["end_date"], "%Y-%m-%d").date()
+        cur = start
+        while cur <= end:
+            date_str = cur.isoformat()
+            existing = await db.schedules.find_one(
+                {"user_id": req["user_id"], "date": date_str}, {"_id": 0, "shift": 1}
+            )
+            current_shift = (existing or {}).get("shift")
+            if current_shift in WORK_SHIFTS:
+                count = await db.schedules.count_documents(
+                    {"date": date_str, "shift": current_shift}
+                )
+                remaining = count - 1  # this user will be removed
+                if remaining < min_active:
+                    conflicts.append({
+                        "date": date_str, "shift": current_shift,
+                        "remaining": remaining, "minimum": min_active,
+                    })
+            cur += timedelta(days=1)
+        if conflicts:
+            raise HTTPException(status_code=409, detail={
+                "message": (f"Persetujuan ditolak otomatis: personil aktif akan turun di bawah "
+                            f"minimum {min_active} pada {len(conflicts)} hari."),
+                "conflicts": conflicts,
+                "min_active": min_active,
+            })
     await db.requests.update_one(
         {"id": req_id},
         {"$set": {"status": body.status, "admin_note": body.admin_note or "", "decided_at": now_iso()}},
@@ -583,6 +651,7 @@ DEFAULT_SETTINGS = {
     "signer_jabatan": "Kepala Unit",
     "signer_nik": "",
     "place": "Jakarta",
+    "min_active_per_shift": 3,
 }
 
 @api.get("/settings")
@@ -669,9 +738,14 @@ async def startup():
         if not verify_password(admin_pw, existing.get("password_hash", "")):
             updates["password_hash"] = hash_password(admin_pw)
         await db.users.update_one({"email": admin_email}, {"$set": updates})
-    # Seed default settings
-    if not await db.settings.find_one({"id": "app_settings"}):
+    # Seed default settings + backfill new fields on existing settings
+    existing_settings = await db.settings.find_one({"id": "app_settings"})
+    if not existing_settings:
         await db.settings.insert_one(dict(DEFAULT_SETTINGS))
+    else:
+        missing = {k: v for k, v in DEFAULT_SETTINGS.items() if k not in existing_settings}
+        if missing:
+            await db.settings.update_one({"id": "app_settings"}, {"$set": missing})
 
 @app.on_event("shutdown")
 async def shutdown():

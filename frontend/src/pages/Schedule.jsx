@@ -7,10 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { ShiftBadge } from "../components/ShiftBadge";
-import { Wand2, FileDown, ChevronLeft, ChevronRight, Loader2, History } from "lucide-react";
+import { Wand2, FileDown, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, History } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 
 const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 const DAY_INITIALS = ["M","S","S","R","K","J","S"];
@@ -174,6 +175,35 @@ export default function Schedule() {
     toast.success("PDF terunduh");
   };
 
+  const exportXLSX = () => {
+    if (!personil.length) return toast.error("Belum ada personil");
+    const header = ["No", "Nama", "NIK", ...Array.from({ length: nDays }, (_, i) => String(i + 1))];
+    const body = personil.map((p, idx) => {
+      const row = [idx + 1, p.name, p.nik];
+      for (let d = 1; d <= nDays; d++) {
+        const s = map[`${p.id}|${dateStr(d)}`];
+        row.push(s ? (SHIFT_META[s]?.code || s) : "");
+      }
+      return row;
+    });
+    const ws = XLSX.utils.aoa_to_sheet([
+      [(settings?.title || "JADWAL SHIFT KERJA PERSONIL")],
+      [`Periode: ${MONTHS[month - 1]} ${year}`],
+      [],
+      header,
+      ...body,
+    ]);
+    ws["!cols"] = [{ wch: 4 }, { wch: 26 }, { wch: 14 }, ...Array.from({ length: nDays }, () => ({ wch: 7 }))];
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 2 + nDays } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 2 + nDays } },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `${MONTHS[month - 1]} ${year}`);
+    XLSX.writeFile(wb, `Jadwal-Shift-${MONTHS[month - 1]}-${year}.xlsx`);
+    toast.success("Excel terunduh");
+  };
+
   return (
     <div className="space-y-6" data-testid="schedule-root">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -201,6 +231,7 @@ export default function Schedule() {
             </>
           )}
           <Button variant="outline" onClick={exportPDF} data-testid="export-pdf-button"><FileDown className="w-4 h-4 mr-2" /> Ekspor PDF</Button>
+          <Button variant="outline" onClick={exportXLSX} data-testid="export-xlsx-button"><FileSpreadsheet className="w-4 h-4 mr-2" /> Ekspor Excel</Button>
         </div>
       </div>
 

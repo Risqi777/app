@@ -9,6 +9,7 @@ import Schedule from "./pages/Schedule";
 import Personnel from "./pages/Personnel";
 import Requests from "./pages/Requests";
 import Settings from "./pages/Settings";
+import Summary from "./pages/Summary";
 import { Toaster } from "sonner";
 
 function Guard({ children, adminOnly = false }) {
@@ -38,6 +39,7 @@ export default function App() {
             <Route element={<Guard><Layout /></Guard>}>
               <Route index element={<Dashboard />} />
               <Route path="/schedule" element={<Schedule />} />
+              <Route path="/summary" element={<Summary />} />
               <Route path="/requests" element={<Requests />} />
               <Route path="/personil" element={<Guard adminOnly><Personnel /></Guard>} />
               <Route path="/settings" element={<Guard adminOnly><Settings /></Guard>} />

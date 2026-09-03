@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "./ui/button";
-import { CalendarDays, Users, FileText, Settings as SettingsIcon, LogOut, LayoutDashboard, ClipboardList } from "lucide-react";
+import { CalendarDays, Users, FileText, Settings as SettingsIcon, LogOut, LayoutDashboard, ClipboardList, BarChart3 } from "lucide-react";
 import { cn } from "../lib/utils";
 
 export default function Layout() {
@@ -12,6 +12,7 @@ export default function Layout() {
   const links = [
     { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
     { to: "/schedule", label: "Jadwal Shift", icon: CalendarDays, testId: "nav-schedule" },
+    { to: "/summary", label: "Ringkasan", icon: BarChart3, testId: "nav-summary" },
     { to: "/requests", label: "Pengajuan", icon: ClipboardList, testId: "nav-requests" },
     ...(isAdmin ? [
       { to: "/personil", label: "Personil", icon: Users, testId: "nav-personil" },

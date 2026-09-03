@@ -7,8 +7,8 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
-import { Plus, Check, X, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "../components/ui/dialog";
+import { Plus, Check, X, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 const statusCls = {
@@ -23,6 +23,7 @@ export default function Requests() {
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ type: "Cuti Tahunan", start_date: "", end_date: "", reason: "" });
+  const [conflict, setConflict] = useState(null); // { reqId, message, conflicts:[], min_active }
 
   const load = async () => {
     try { const { data } = await api.get("/requests"); setList(data); }
@@ -40,9 +41,20 @@ export default function Requests() {
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
-  const decide = async (id, status) => {
-    try { await api.patch(`/requests/${id}`, { status }); toast.success(`Pengajuan ${status === "approved" ? "disetujui" : "ditolak"}`); await load(); }
-    catch (e) { toast.error(formatApiError(e)); }
+  const decide = async (id, status, force = false) => {
+    try {
+      await api.patch(`/requests/${id}`, { status, force });
+      toast.success(`Pengajuan ${status === "approved" ? "disetujui" : "ditolak"}`);
+      setConflict(null);
+      await load();
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && detail && typeof detail === "object" && detail.conflicts) {
+        setConflict({ reqId: id, ...detail });
+      } else {
+        toast.error(formatApiError(e));
+      }
+    }
   };
 
   const remove = async (id) => {
@@ -124,6 +136,40 @@ export default function Requests() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Batal</Button>
             <Button className="bg-sky-600 hover:bg-sky-700" onClick={submit} disabled={!form.start_date || !form.end_date} data-testid="submit-request-button">Kirim Pengajuan</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conflict resolution dialog */}
+      <Dialog open={!!conflict} onOpenChange={(o) => !o && setConflict(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="w-5 h-5" /> Konflik Coverage Terdeteksi
+            </DialogTitle>
+            <DialogDescription>{conflict?.message}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[40vh] overflow-y-auto rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3">
+            <table className="w-full text-xs">
+              <thead className="text-slate-600 dark:text-slate-300">
+                <tr><th className="text-left p-1">Tanggal</th><th className="text-left p-1">Shift</th><th className="text-right p-1">Sisa</th><th className="text-right p-1">Minimum</th></tr>
+              </thead>
+              <tbody>
+                {(conflict?.conflicts || []).map((c, i) => (
+                  <tr key={i} className="border-t border-amber-200 dark:border-amber-800">
+                    <td className="p-1 font-mono-alt">{c.date}</td>
+                    <td className="p-1 font-semibold">{c.shift}</td>
+                    <td className="p-1 text-right text-rose-600 font-bold">{c.remaining}</td>
+                    <td className="p-1 text-right">{c.minimum}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConflict(null)}>Batalkan</Button>
+            <Button className="bg-rose-600 hover:bg-rose-700" onClick={() => decide(conflict.reqId, "rejected")} data-testid="conflict-reject-button">Tolak Pengajuan</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => decide(conflict.reqId, "approved", true)} data-testid="conflict-force-approve-button">Tetap Setujui</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

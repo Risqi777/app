@@ -198,3 +198,215 @@ class TestRequestDecisionAuditAndEmail:
         assert r.status_code == 200
         for k in ("status", "admin_note", "decided_at"):
             assert k in r.json()
+
+
+
+# ---------- Iteration 3: schedule/summary + conflict detection + force approve ----------
+def _login(email, nik, pw):
+    r = requests.post(f"{BASE}/auth/login",
+                      json={"email": email, "nik": nik, "password": pw}, timeout=15)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+@pytest.fixture(scope="class")
+def three_personil(admin_headers):
+    """Create 3 fresh personil users via /api/personil (admin) for conflict tests."""
+    users = []
+    for i in range(3):
+        uniq = uuid.uuid4().hex[:8]
+        payload = {
+            "email": f"TEST_conf_{uniq}@test.com",
+            "nik": f"81{uniq}",
+            "name": f"TEST Conf {i}_{uniq}",
+            "password": "Test@123",
+            "role": "personil",
+        }
+        r = requests.post(f"{BASE}/personil", headers=admin_headers, json=payload, timeout=15)
+        assert r.status_code == 200, r.text
+        u = r.json()
+        tok = _login(payload["email"], payload["nik"], payload["password"])["token"]
+        users.append({"user": u, "token": tok, "creds": payload})
+    return users
+
+
+class TestScheduleSummary:
+    def test_summary_shape_admin(self, admin_headers):
+        r = requests.get(f"{BASE}/schedule/summary?month=12&year=2025",
+                         headers=admin_headers, timeout=30)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["month"] == 12 and body["year"] == 2025
+        assert body["days_in_month"] == 31
+        assert isinstance(body["rows"], list) and len(body["rows"]) > 0
+        row = body["rows"][0]
+        for k in ("user_id", "name", "nik", "counts", "total_work",
+                  "total_libur", "total_cuti", "total_absen"):
+            assert k in row, f"missing {k}"
+        for code in ["Pagi", "Siang", "Malam", "Libur", "Cuti Tahunan",
+                     "Cuti Penting", "Cuti Besar", "Sakit", "Dinas Luar",
+                     "Diklat", "Penugasan"]:
+            assert code in row["counts"], f"missing shift code {code}"
+        # totals consistency
+        c = row["counts"]
+        assert row["total_work"] == c["Pagi"] + c["Siang"] + c["Malam"]
+        assert row["total_libur"] == c["Libur"]
+        assert row["total_cuti"] == c["Cuti Tahunan"] + c["Cuti Penting"] + c["Cuti Besar"]
+        assert row["total_absen"] == c["Sakit"] + c["Dinas Luar"] + c["Diklat"] + c["Penugasan"]
+
+    def test_summary_accessible_by_personil(self, personil_headers):
+        r = requests.get(f"{BASE}/schedule/summary?month=12&year=2025",
+                         headers=personil_headers, timeout=30)
+        assert r.status_code == 200
+        assert "rows" in r.json()
+
+
+class TestSettingsMinActive:
+    def test_patch_and_get_min_active(self, admin_headers):
+        r = requests.patch(f"{BASE}/settings", headers=admin_headers,
+                           json={"min_active_per_shift": 2}, timeout=15)
+        assert r.status_code == 200
+        assert r.json()["min_active_per_shift"] == 2
+        r = requests.get(f"{BASE}/settings", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        assert r.json()["min_active_per_shift"] == 2
+        # Reset to 3 for downstream conflict test
+        r = requests.patch(f"{BASE}/settings", headers=admin_headers,
+                           json={"min_active_per_shift": 3}, timeout=15)
+        assert r.status_code == 200 and r.json()["min_active_per_shift"] == 3
+
+
+class TestConflictAndForce:
+    """Set up 3 personil on Pagi for 2026-03-10 & 2026-03-11, then run conflict flow."""
+
+    @staticmethod
+    def _set_cell(admin_headers, uid, date_str, shift):
+        r = requests.post(f"{BASE}/schedule/cell", headers=admin_headers,
+                          json={"user_id": uid, "date": date_str, "shift": shift}, timeout=15)
+        assert r.status_code == 200, r.text
+
+    def test_a_setup_seed_schedule(self, admin_headers, three_personil):
+        # Ensure min_active=3
+        r = requests.patch(f"{BASE}/settings", headers=admin_headers,
+                           json={"min_active_per_shift": 3}, timeout=15)
+        assert r.status_code == 200
+        # Delete any existing rows for these users on these dates by overwriting
+        for u in three_personil:
+            self._set_cell(admin_headers, u["user"]["id"], "2026-03-10", "Pagi")
+            self._set_cell(admin_headers, u["user"]["id"], "2026-03-11", "Pagi")
+
+    def test_b_approve_conflict_returns_409(self, admin_headers, three_personil):
+        p = three_personil[0]
+        h = {"Authorization": f"Bearer {p['token']}"}
+        req = requests.post(f"{BASE}/requests", headers=h, json={
+            "type": "Cuti Tahunan", "start_date": "2026-03-10",
+            "end_date": "2026-03-10", "reason": "conflict test",
+        }, timeout=15)
+        assert req.status_code == 200
+        rid = req.json()["id"]
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved"}, timeout=30)
+        assert r.status_code == 409, f"expected 409, got {r.status_code} {r.text}"
+        detail = r.json()["detail"]
+        assert "message" in detail and "conflicts" in detail
+        assert detail["min_active"] == 3
+        c = next((c for c in detail["conflicts"]
+                  if c["date"] == "2026-03-10" and c["shift"] == "Pagi"), None)
+        assert c is not None, f"conflict entry missing: {detail}"
+        assert c["remaining"] == 2 and c["minimum"] == 3
+
+        # Ensure request still pending, no schedule change
+        got = requests.get(f"{BASE}/requests", headers=admin_headers, timeout=15).json()
+        this_req = next(x for x in got if x["id"] == rid)
+        assert this_req["status"] == "pending"
+
+        sched = requests.get(f"{BASE}/schedule?month=3&year=2026",
+                             headers=admin_headers, timeout=15).json()
+        cell = next(s for s in sched
+                    if s["user_id"] == p["user"]["id"] and s["date"] == "2026-03-10")
+        assert cell["shift"] == "Pagi"
+
+        # Save id for next test via class attribute
+        TestConflictAndForce._pending_rid = rid
+        TestConflictAndForce._uid = p["user"]["id"]
+
+    def test_c_force_approve_succeeds(self, admin_headers):
+        rid = TestConflictAndForce._pending_rid
+        uid = TestConflictAndForce._uid
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved", "force": True,
+                                 "admin_note": "forced"}, timeout=30)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "approved"
+        # Schedule cell should now be Cuti Tahunan
+        sched = requests.get(f"{BASE}/schedule?month=3&year=2026",
+                             headers=admin_headers, timeout=15).json()
+        cell = next(s for s in sched if s["user_id"] == uid and s["date"] == "2026-03-10")
+        assert cell["shift"] == "Cuti Tahunan"
+        # Audit row created
+        aud = requests.get(f"{BASE}/schedule/audit?month=3&year=2026",
+                           headers=admin_headers, timeout=15).json()
+        matching = [x for x in aud
+                    if x["user_id"] == uid and x["date"] == "2026-03-10"
+                    and x["source"] == "request-approve"
+                    and x["shift_after"] == "Cuti Tahunan"]
+        assert len(matching) >= 1
+
+    def test_d_no_conflict_when_min_lowered(self, admin_headers, three_personil):
+        # Lower min to 2
+        r = requests.patch(f"{BASE}/settings", headers=admin_headers,
+                           json={"min_active_per_shift": 2}, timeout=15)
+        assert r.status_code == 200
+        # 2026-03-11: still 3 users on Pagi from setup — approve one Cuti (remaining=2 >= 2)
+        p = three_personil[1]
+        h = {"Authorization": f"Bearer {p['token']}"}
+        req = requests.post(f"{BASE}/requests", headers=h, json={
+            "type": "Cuti Tahunan", "start_date": "2026-03-11",
+            "end_date": "2026-03-11", "reason": "no conflict",
+        }, timeout=15)
+        assert req.status_code == 200
+        rid = req.json()["id"]
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved"}, timeout=30)
+        assert r.status_code == 200, f"expected 200 got {r.status_code} {r.text}"
+        assert r.json()["status"] == "approved"
+
+    def test_e_penugasan_bypasses_conflict(self, admin_headers, three_personil):
+        # Reset min to 3 to make would-be-conflict again
+        requests.patch(f"{BASE}/settings", headers=admin_headers,
+                       json={"min_active_per_shift": 3}, timeout=15)
+        # Set 3 personil back on Pagi for a fresh date 2026-03-12
+        for u in three_personil:
+            self._set_cell(admin_headers, u["user"]["id"], "2026-03-12", "Pagi")
+        p = three_personil[2]
+        h = {"Authorization": f"Bearer {p['token']}"}
+        req = requests.post(f"{BASE}/requests", headers=h, json={
+            "type": "Penugasan", "start_date": "2026-03-12",
+            "end_date": "2026-03-12", "reason": "penugasan bypass",
+        }, timeout=15)
+        assert req.status_code == 200
+        rid = req.json()["id"]
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved"}, timeout=30)
+        assert r.status_code == 200, f"Penugasan should bypass, got {r.status_code} {r.text}"
+        assert r.json()["status"] == "approved"
+
+    def test_f_reject_unaffected_by_conflict(self, admin_headers, three_personil):
+        # Re-seed 2026-03-13 with 3 on Pagi (min_active=3)
+        requests.patch(f"{BASE}/settings", headers=admin_headers,
+                       json={"min_active_per_shift": 3}, timeout=15)
+        for u in three_personil:
+            self._set_cell(admin_headers, u["user"]["id"], "2026-03-13", "Pagi")
+        p = three_personil[0]
+        h = {"Authorization": f"Bearer {p['token']}"}
+        req = requests.post(f"{BASE}/requests", headers=h, json={
+            "type": "Sakit", "start_date": "2026-03-13",
+            "end_date": "2026-03-13", "reason": "reject test",
+        }, timeout=15)
+        assert req.status_code == 200
+        rid = req.json()["id"]
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "rejected", "admin_note": "no"}, timeout=30)
+        assert r.status_code == 200
+        assert r.json()["status"] == "rejected"

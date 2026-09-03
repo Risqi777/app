@@ -94,6 +94,19 @@ export default function Settings() {
       </div>
 
       <Card className="p-6 space-y-4">
+        <h2 className="font-heading text-lg font-bold">Aturan Operasional</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label>Minimum Personil Aktif per Shift</Label>
+            <Input type="number" min={1} max={10} value={s.min_active_per_shift ?? 3}
+              onChange={(e) => setS({ ...s, min_active_per_shift: Number(e.target.value) })}
+              data-testid="min-active-input" />
+            <p className="text-xs text-slate-500 mt-1">Pengajuan cuti/sakit/dinas otomatis ditolak bila persetujuan akan menurunkan personil aktif di suatu shift di bawah nilai ini.</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-6 space-y-4">
         <h2 className="font-heading text-lg font-bold">Data Penandatangan</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div><Label>Nama Lengkap</Label><Input value={s.signer_name || ""} onChange={(e) => setS({ ...s, signer_name: e.target.value })} data-testid="signer-name-input" /></div>
