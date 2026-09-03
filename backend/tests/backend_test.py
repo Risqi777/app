@@ -522,3 +522,147 @@ class TestNotifications:
         assert r.status_code in (401, 403)
 
 
+# ---------- Iteration 5: Public settings + decision notifies personil ----------
+PUBLIC_KEYS = ["title", "subtitle", "logo", "app_name",
+               "hero_title", "hero_subtitle", "hero_image",
+               "dashboard_banner_title", "dashboard_banner_message",
+               "dashboard_banner_image"]
+
+
+class TestPublicSettings:
+    def test_public_settings_no_auth(self):
+        r = requests.get(f"{BASE}/settings/public", timeout=15)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        for k in PUBLIC_KEYS:
+            assert k in body, f"missing key {k} in /settings/public"
+
+    def test_public_settings_no_sensitive_fields(self):
+        r = requests.get(f"{BASE}/settings/public", timeout=15)
+        body = r.json()
+        for k in ("signature", "signer_name", "signer_nik", "min_active_per_shift"):
+            assert k not in body, f"sensitive key {k} leaked in /settings/public"
+
+    def test_patch_branding_and_reflect_public(self, admin_headers):
+        uniq = uuid.uuid4().hex[:6]
+        payload = {
+            "app_name": f"TEST App {uniq}",
+            "hero_title": f"TEST hero {uniq}",
+            "hero_subtitle": f"TEST hs {uniq}",
+            "hero_image": "data:image/png;base64,AAAA",
+            "dashboard_banner_title": f"TEST bt {uniq}",
+            "dashboard_banner_message": f"TEST bm {uniq}",
+            "dashboard_banner_image": "data:image/png;base64,BBBB",
+        }
+        r = requests.patch(f"{BASE}/settings", headers=admin_headers, json=payload, timeout=15)
+        assert r.status_code == 200, r.text
+        got = r.json()
+        for k, v in payload.items():
+            assert got[k] == v, f"admin GET after patch {k}: expected {v}, got {got.get(k)}"
+        # Public endpoint reflects the update (no auth)
+        pub = requests.get(f"{BASE}/settings/public", timeout=15).json()
+        for k, v in payload.items():
+            assert pub[k] == v, f"/settings/public {k}: expected {v}, got {pub.get(k)}"
+
+    def test_patch_settings_requires_admin(self, personil_headers):
+        r = requests.patch(f"{BASE}/settings", headers=personil_headers,
+                           json={"app_name": "hacker"}, timeout=15)
+        assert r.status_code == 403
+
+
+class TestDecisionNotifiesPersonil:
+    def _create_req(self, personil_headers, req_type, start, end):
+        r = requests.post(f"{BASE}/requests", headers=personil_headers,
+                          json={"type": req_type, "start_date": start,
+                                "end_date": end, "reason": "iter5"}, timeout=15)
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def test_approve_creates_personil_notification(self, admin_headers, personil, personil_headers):
+        # Clear personil's unread first
+        requests.post(f"{BASE}/notifications/read-all", headers=personil_headers, timeout=15)
+        start, end = "2027-10-05", "2027-10-06"
+        rid = self._create_req(personil_headers, "Cuti Tahunan", start, end)
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved", "admin_note": "OK note"}, timeout=60)
+        assert r.status_code == 200, r.text
+        notifs = requests.get(f"{BASE}/notifications?limit=50",
+                              headers=personil_headers, timeout=15).json()
+        match = [n for n in notifs["items"] if n.get("ref_id") == rid]
+        assert len(match) >= 1, f"no personil notification for req {rid}"
+        n = match[0]
+        assert n["type"] == "request_approved"
+        assert "disetujui" in n["title"].lower()
+        assert start in n["message"] and end in n["message"]
+        assert "OK note" in n["message"]
+        assert n["read"] is False
+        assert n["ref_route"] == "/requests"
+        assert n["user_id"] == personil["user"]["id"]
+
+    def test_reject_creates_personil_notification(self, admin_headers, personil, personil_headers):
+        requests.post(f"{BASE}/notifications/read-all", headers=personil_headers, timeout=15)
+        start, end = "2027-11-05", "2027-11-05"
+        rid = self._create_req(personil_headers, "Sakit", start, end)
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "rejected", "admin_note": "not now"}, timeout=30)
+        assert r.status_code == 200, r.text
+        notifs = requests.get(f"{BASE}/notifications?limit=50",
+                              headers=personil_headers, timeout=15).json()
+        match = [n for n in notifs["items"] if n.get("ref_id") == rid]
+        assert len(match) >= 1
+        n = match[0]
+        assert n["type"] == "request_rejected"
+        assert "ditolak" in n["title"].lower()
+        assert start in n["message"] and end in n["message"]
+        assert "not now" in n["message"]
+        assert n["ref_route"] == "/requests"
+
+    def test_approve_without_note_message_has_no_catatan(self, admin_headers, personil_headers):
+        requests.post(f"{BASE}/notifications/read-all", headers=personil_headers, timeout=15)
+        start, end = "2027-12-01", "2027-12-01"
+        rid = self._create_req(personil_headers, "Diklat", start, end)
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved"}, timeout=60)
+        assert r.status_code == 200
+        notifs = requests.get(f"{BASE}/notifications?limit=50",
+                              headers=personil_headers, timeout=15).json()
+        n = next(x for x in notifs["items"] if x["ref_id"] == rid)
+        assert "Catatan" not in n["message"]
+
+    def test_force_approve_fires_personil_notification(self, admin_headers, three_personil):
+        # Setup: min_active=3, 3 users on Pagi at a new date
+        requests.patch(f"{BASE}/settings", headers=admin_headers,
+                       json={"min_active_per_shift": 3}, timeout=15)
+        date_str = "2026-04-10"
+        for u in three_personil:
+            requests.post(f"{BASE}/schedule/cell", headers=admin_headers,
+                          json={"user_id": u["user"]["id"], "date": date_str,
+                                "shift": "Pagi"}, timeout=15)
+        p = three_personil[0]
+        ph = {"Authorization": f"Bearer {p['token']}"}
+        # Clear personil unread
+        requests.post(f"{BASE}/notifications/read-all", headers=ph, timeout=15)
+        req = requests.post(f"{BASE}/requests", headers=ph, json={
+            "type": "Cuti Tahunan", "start_date": date_str,
+            "end_date": date_str, "reason": "force notify"}, timeout=15)
+        assert req.status_code == 200
+        rid = req.json()["id"]
+        # Non-force should 409
+        r_conf = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                                json={"status": "approved"}, timeout=30)
+        assert r_conf.status_code == 409
+        # Force approves
+        r = requests.patch(f"{BASE}/requests/{rid}", headers=admin_headers,
+                           json={"status": "approved", "force": True,
+                                 "admin_note": "forced ok"}, timeout=30)
+        assert r.status_code == 200
+        # Personil got notified
+        notifs = requests.get(f"{BASE}/notifications?limit=50", headers=ph, timeout=15).json()
+        match = [n for n in notifs["items"] if n.get("ref_id") == rid]
+        assert len(match) >= 1
+        n = match[0]
+        assert n["type"] == "request_approved"
+        assert "disetujui" in n["title"].lower()
+        assert "forced ok" in n["message"]
+
+

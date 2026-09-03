@@ -298,6 +298,13 @@ class SettingsIn(BaseModel):
     signer_nik: Optional[str] = None
     place: Optional[str] = None
     min_active_per_shift: Optional[int] = None
+    app_name: Optional[str] = None
+    hero_title: Optional[str] = None
+    hero_subtitle: Optional[str] = None
+    hero_image: Optional[str] = None
+    dashboard_banner_title: Optional[str] = None
+    dashboard_banner_message: Optional[str] = None
+    dashboard_banner_image: Optional[str] = None
 
 # ============= Auth =============
 @api.post("/auth/register")
@@ -654,6 +661,19 @@ async def decide_request(req_id: str, body: RequestDecisionIn, admin: dict = Dep
             await log_audit(req["user_id"], cur.isoformat(), (existing or {}).get("shift"),
                             req["type"], admin, "request-approve")
             cur += timedelta(days=1)
+    # Notify personil about admin decision (in-app + browser)
+    status_label = "disetujui" if body.status == "approved" else "ditolak"
+    await db.notifications.insert_one({
+        "id": new_id(),
+        "user_id": req["user_id"],
+        "type": f"request_{body.status}",
+        "title": f"Pengajuan {req['type']} {status_label}",
+        "message": f"Pengajuan Anda ({req['start_date']} → {req['end_date']}) telah {status_label}" + (f". Catatan: {body.admin_note}" if body.admin_note else "."),
+        "ref_id": req_id,
+        "ref_route": "/requests",
+        "read": False,
+        "created_at": now_iso(),
+    })
     # Send email notification (non-blocking; failures logged only)
     recipient = await db.users.find_one({"id": req["user_id"]}, {"_id": 0, "email": 1, "name": 1})
     if recipient and recipient.get("email"):
@@ -692,6 +712,14 @@ DEFAULT_SETTINGS = {
     "signer_nik": "",
     "place": "Jakarta",
     "min_active_per_shift": 3,
+    # Branding / tampilan (editable oleh admin)
+    "app_name": "Shift Scheduler",
+    "hero_title": "Jadwal Shift Kerja untuk 16 Personil, Terstruktur & Profesional.",
+    "hero_subtitle": "Kelola shift Pagi, Siang, Malam & Libur. Ajukan Cuti, Sakit, Dinas Luar, Diklat hingga Penugasan dalam satu sistem.",
+    "hero_image": None,
+    "dashboard_banner_title": "Selamat datang di Shift Scheduler",
+    "dashboard_banner_message": "Pantau shift, ajukan pengajuan, dan kelola operasional harian dengan mudah.",
+    "dashboard_banner_image": None,
 }
 
 @api.get("/settings")
@@ -701,6 +729,14 @@ async def get_settings(user: dict = Depends(get_current_user)):
         await db.settings.insert_one(dict(DEFAULT_SETTINGS))
         doc = dict(DEFAULT_SETTINGS)
     return doc
+
+@api.get("/settings/public")
+async def get_public_settings():
+    doc = await db.settings.find_one({"id": "app_settings"}, {"_id": 0}) or dict(DEFAULT_SETTINGS)
+    public_keys = ["title", "subtitle", "logo", "app_name",
+                   "hero_title", "hero_subtitle", "hero_image",
+                   "dashboard_banner_title", "dashboard_banner_message", "dashboard_banner_image"]
+    return {k: doc.get(k) for k in public_keys}
 
 @api.patch("/settings")
 async def update_settings(body: SettingsIn, admin: dict = Depends(require_admin)):

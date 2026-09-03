@@ -8,7 +8,7 @@ import { cn } from "../lib/utils";
 
 const POLL_MS = 20000;
 
-export default function NotificationBell() {
+export default function NotificationBell({ darkContext = false }) {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -37,7 +37,6 @@ export default function NotificationBell() {
   };
 
   useEffect(() => {
-    // First fetch primes lastSeenIds without firing browser notifications
     load(false);
     if (typeof Notification !== "undefined" && Notification.permission === "default" && !permissionRequested.current) {
       permissionRequested.current = true;
@@ -65,12 +64,17 @@ export default function NotificationBell() {
       <DropdownMenuTrigger asChild>
         <button
           data-testid="notification-bell"
-          className="relative w-9 h-9 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className={cn(
+            "relative w-9 h-9 rounded-lg flex items-center justify-center transition-colors",
+            darkContext
+              ? "text-cyan-200 hover:bg-white/10"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800",
+          )}
           aria-label="Notifikasi"
         >
           <Bell className={cn("w-5 h-5", unread > 0 && "animate-[wiggle_0.6s_ease-in-out]")} />
           {unread > 0 && (
-            <span data-testid="notif-badge" className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">
+            <span data-testid="notif-badge" className="pulse-glow absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center border border-white/60">
               {unread > 99 ? "99+" : unread}
             </span>
           )}

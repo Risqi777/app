@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 5 backend tested: /api/settings/public (unauth) + branding fields + personil in-app notifications on approve/reject/force. Added 8 new tests to /app/backend/tests/backend_test.py (TestPublicSettings, TestDecisionNotifiesPersonil). All 39 tests pass after cleaning stale test_conf_* seed users (case-insensitive email prefix) that were causing regression conflict tests to see >3 Pagi personil.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/settings/public", "issue": "Endpoint reveals branding but response is fine; consider adding cache headers for public/anonymous access to reduce DB load."},
+      {"endpoint": "/api/requests/{id} PATCH", "issue": "Notification insert is not wrapped in try/except; if it fails after schedule mutation, the transaction is partial (schedule updated, no notif). Non-blocking today but worth guarding."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iteration_5.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py ~830 lines — approaching split threshold; consider modularising (auth, schedule, requests, notifications, settings).",
+    "decide_request inserts notification AFTER schedule mutation without try/except — a failed insert leaves state inconsistent.",
+    "email dispatch uses EMAIL_FROM_NAME as app_name instead of settings.app_name from DB (branding drift).",
+    "no DB index on notifications.user_id + created_at — will be slow at scale.",
+    "public settings endpoint has no rate limit; base64 images can be large — consider bandwidth cap or ETag."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (39/39)", "frontend": "N/A"},
+  "test_credentials": "Admin: rsqikurniawan@gmail.com / NIK 1000000001 / Admin@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Session-scoped personil TEST_p_<uuid>. Class-scoped 3 personil TEST_conf_<uuid> for conflict tests. Branding fields patched to TEST App/hero/banner strings. Cleaned pre-existing lowercase test_conf_* stale users (9 users, 120 schedule rows, 9 requests) before rerun.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "If TestConflictAndForce fails with 'expected 409 got 200', run mongo cleanup for users with email matching /^test_conf_/i and their schedules/requests. Regex on email is case-sensitive by default in Mongo — use $options:'i' since emails are lower-cased on save. All iter1-5 features covered.",
+  "rca of the issue": "Initial run showed 3 unrelated failures in TestConflictAndForce.test_b/c and TestDecisionNotifiesPersonil.test_force_approve. RCA: /api/personil PATCH does not delete schedules; and /api/auth/register lowercases email, so previous iterations left users with email prefix 'test_conf_' (lowercase). The regex cleanup guidance used '^TEST_conf_' which didn't match. Deleting all matching /^test_conf_/i users and their schedules restored expected Pagi count to exactly 3, making conflict math correct. Fix applied in DB only, not in test code; long-term suggestion is to add a session-scope cleanup fixture that purges emails starting with test_ before tests run."
+}

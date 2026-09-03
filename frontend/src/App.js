@@ -1,6 +1,7 @@
 import "./App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { BrandingProvider } from "./contexts/BrandingContext";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -31,8 +32,9 @@ export default function App() {
   return (
     <div className="App">
       <BrowserRouter>
-        <AuthProvider>
-          <Toaster position="top-right" richColors />
+        <BrandingProvider>
+          <AuthProvider>
+            <Toaster position="top-right" richColors />
           <Routes>
             <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
             <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
@@ -46,7 +48,8 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </AuthProvider>
+          </AuthProvider>
+        </BrandingProvider>
       </BrowserRouter>
     </div>
   );
