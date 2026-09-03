@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { SHIFT_KEYS, SHIFT_META, formatApiError } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { Card } from "../components/ui/card";
@@ -31,7 +31,7 @@ export default function Schedule() {
   const [auditOpen, setAuditOpen] = useState(false);
   const [audit, setAudit] = useState([]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [pers, sch, set] = await Promise.all([
@@ -44,10 +44,9 @@ export default function Schedule() {
       setSettings(set.data);
     } catch (e) { toast.error(formatApiError(e)); }
     finally { setLoading(false); }
-  };
+  }, [month, year]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [month, year]);
+  useEffect(() => { load(); }, [load]);
 
   const nDays = daysInMonth(year, month);
   const map = useMemo(() => {
@@ -100,7 +99,8 @@ export default function Schedule() {
     // Header
     let headerHeight = 60;
     if (settings?.logo) {
-      try { doc.addImage(settings.logo, "PNG", 32, 24, 48, 48); } catch (_) {}
+      try { doc.addImage(settings.logo, "PNG", 32, 24, 48, 48); }
+      catch (e) { console.warn("PDF logo embed failed:", e?.message); }
     }
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
@@ -161,7 +161,8 @@ export default function Schedule() {
     doc.text(settings?.signer_jabatan || "Kepala Unit", sigX, y);
     y += 6;
     if (settings?.signature) {
-      try { doc.addImage(settings.signature, "PNG", sigX, y, 140, 60); } catch (_) {}
+      try { doc.addImage(settings.signature, "PNG", sigX, y, 140, 60); }
+      catch (e) { console.warn("PDF signature embed failed:", e?.message); }
     }
     y += 68;
     doc.text(settings?.signer_name || "", sigX, y);

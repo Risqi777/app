@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import api, { REQUEST_TYPES, formatApiError } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { Card } from "../components/ui/card";
@@ -25,11 +25,11 @@ export default function Requests() {
   const [form, setForm] = useState({ type: "Cuti Tahunan", start_date: "", end_date: "", reason: "" });
   const [conflict, setConflict] = useState(null); // { reqId, message, conflicts:[], min_active }
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try { const { data } = await api.get("/requests"); setList(data); }
     catch (e) { toast.error(formatApiError(e)); }
-  };
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -155,8 +155,8 @@ export default function Requests() {
                 <tr><th className="text-left p-1">Tanggal</th><th className="text-left p-1">Shift</th><th className="text-right p-1">Sisa</th><th className="text-right p-1">Minimum</th></tr>
               </thead>
               <tbody>
-                {(conflict?.conflicts || []).map((c, i) => (
-                  <tr key={i} className="border-t border-amber-200 dark:border-amber-800">
+                {(conflict?.conflicts || []).map((c) => (
+                  <tr key={`${c.date}-${c.shift}`} className="border-t border-amber-200 dark:border-amber-800">
                     <td className="p-1 font-mono-alt">{c.date}</td>
                     <td className="p-1 font-semibold">{c.shift}</td>
                     <td className="p-1 text-right text-rose-600 font-bold">{c.remaining}</td>

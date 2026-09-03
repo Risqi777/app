@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import api, { SHIFT_KEYS, SHIFT_META, formatApiError } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -18,14 +18,14 @@ export default function Summary() {
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const { data } = await api.get("/schedule/summary", { params: { month, year } });
       setData(data);
     } catch (e) { toast.error(formatApiError(e)); }
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [month, year]);
+  }, [month, year]);
+
+  useEffect(() => { load(); }, [load]);
 
   const rows = useMemo(() => {
     const list = data?.rows || [];
@@ -77,7 +77,7 @@ export default function Summary() {
           <Button variant="outline" size="icon" onClick={prevMonth} data-testid="prev-month-btn"><ChevronLeft className="w-4 h-4" /></Button>
           <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{MONTHS.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}</SelectContent>
+            <SelectContent>{MONTHS.map((m, i) => (<SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>))}</SelectContent>
           </Select>
           <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
             <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>

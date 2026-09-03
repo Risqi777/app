@@ -605,38 +605,90 @@ async def mark_all_read(user: dict = Depends(get_current_user)):
     )
     return {"ok": True, "updated": res.modified_count}
 
+WORK_SHIFTS = {"Pagi", "Siang", "Malam"}
+ABSENCE_TYPES = {"Cuti Tahunan", "Cuti Penting", "Cuti Besar", "Sakit", "Dinas Luar", "Diklat"}
+
+async def _check_absence_conflicts(req: dict) -> tuple:
+    """Return (conflicts, min_active). Non-empty conflicts means approval would drop coverage below minimum."""
+    settings_doc = await db.settings.find_one({"id": "app_settings"}, {"_id": 0}) or {}
+    min_active = int(settings_doc.get("min_active_per_shift", 3) or 3)
+    conflicts = []
+    start = datetime.strptime(req["start_date"], "%Y-%m-%d").date()
+    end = datetime.strptime(req["end_date"], "%Y-%m-%d").date()
+    cur = start
+    while cur <= end:
+        date_str = cur.isoformat()
+        existing = await db.schedules.find_one(
+            {"user_id": req["user_id"], "date": date_str}, {"_id": 0, "shift": 1}
+        )
+        current_shift = (existing or {}).get("shift")
+        if current_shift in WORK_SHIFTS:
+            count = await db.schedules.count_documents({"date": date_str, "shift": current_shift})
+            remaining = count - 1
+            if remaining < min_active:
+                conflicts.append({
+                    "date": date_str, "shift": current_shift,
+                    "remaining": remaining, "minimum": min_active,
+                })
+        cur += timedelta(days=1)
+    return conflicts, min_active
+
+async def _apply_approval_to_schedule(req: dict, admin: dict) -> None:
+    """Overwrite schedule cells for the request range with the request type and audit each change."""
+    start = datetime.strptime(req["start_date"], "%Y-%m-%d").date()
+    end = datetime.strptime(req["end_date"], "%Y-%m-%d").date()
+    cur = start
+    while cur <= end:
+        key = {"user_id": req["user_id"], "date": cur.isoformat()}
+        existing = await db.schedules.find_one(key, {"_id": 0, "shift": 1})
+        doc = {**key, "shift": req["type"], "day": cur.day, "month": cur.month,
+               "year": cur.year, "updated_at": now_iso()}
+        await db.schedules.update_one(key, {"$set": doc}, upsert=True)
+        await log_audit(req["user_id"], cur.isoformat(), (existing or {}).get("shift"),
+                        req["type"], admin, "request-approve")
+        cur += timedelta(days=1)
+
+async def _notify_personil_decision(req: dict, status: str, admin_note: str) -> None:
+    status_label = "disetujui" if status == "approved" else "ditolak"
+    msg = f"Pengajuan Anda ({req['start_date']} → {req['end_date']}) telah {status_label}"
+    msg += f". Catatan: {admin_note}" if admin_note else "."
+    try:
+        await db.notifications.insert_one({
+            "id": new_id(),
+            "user_id": req["user_id"],
+            "type": f"request_{status}",
+            "title": f"Pengajuan {req['type']} {status_label}",
+            "message": msg,
+            "ref_id": req["id"],
+            "ref_route": "/requests",
+            "read": False,
+            "created_at": now_iso(),
+        })
+    except Exception as e:
+        logger.error(f"Personil notification insert failed (non-blocking): {e}")
+
+async def _dispatch_decision_email(req: dict, status: str, admin_note: str) -> None:
+    recipient = await db.users.find_one({"id": req["user_id"]}, {"_id": 0, "email": 1, "name": 1})
+    if not (recipient and recipient.get("email")):
+        return
+    subject, html = build_decision_email(
+        user_name=recipient["name"], req_type=req["type"],
+        start=req["start_date"], end=req["end_date"],
+        status=status, admin_note=admin_note or "",
+        app_name=EMAIL_FROM_NAME,
+    )
+    try:
+        await send_email(to=recipient["email"], subject=subject, html=html)
+    except Exception as e:
+        logger.error(f"Email dispatch error (non-blocking): {e}")
+
 @api.patch("/requests/{req_id}")
 async def decide_request(req_id: str, body: RequestDecisionIn, admin: dict = Depends(require_admin)):
     req = await db.requests.find_one({"id": req_id})
     if not req:
         raise HTTPException(status_code=404, detail="Pengajuan tidak ditemukan")
-    # Conflict check on approval (skip if type is Penugasan since it still counts as work)
-    WORK_SHIFTS = {"Pagi", "Siang", "Malam"}
-    ABSENCE_TYPES = {"Cuti Tahunan", "Cuti Penting", "Cuti Besar", "Sakit", "Dinas Luar", "Diklat"}
-    conflicts = []
     if body.status == "approved" and req["type"] in ABSENCE_TYPES and not body.force:
-        settings_doc = await db.settings.find_one({"id": "app_settings"}, {"_id": 0}) or {}
-        min_active = int(settings_doc.get("min_active_per_shift", 3) or 3)
-        start = datetime.strptime(req["start_date"], "%Y-%m-%d").date()
-        end = datetime.strptime(req["end_date"], "%Y-%m-%d").date()
-        cur = start
-        while cur <= end:
-            date_str = cur.isoformat()
-            existing = await db.schedules.find_one(
-                {"user_id": req["user_id"], "date": date_str}, {"_id": 0, "shift": 1}
-            )
-            current_shift = (existing or {}).get("shift")
-            if current_shift in WORK_SHIFTS:
-                count = await db.schedules.count_documents(
-                    {"date": date_str, "shift": current_shift}
-                )
-                remaining = count - 1  # this user will be removed
-                if remaining < min_active:
-                    conflicts.append({
-                        "date": date_str, "shift": current_shift,
-                        "remaining": remaining, "minimum": min_active,
-                    })
-            cur += timedelta(days=1)
+        conflicts, min_active = await _check_absence_conflicts(req)
         if conflicts:
             raise HTTPException(status_code=409, detail={
                 "message": (f"Persetujuan ditolak otomatis: personil aktif akan turun di bawah "
@@ -648,47 +700,11 @@ async def decide_request(req_id: str, body: RequestDecisionIn, admin: dict = Dep
         {"id": req_id},
         {"$set": {"status": body.status, "admin_note": body.admin_note or "", "decided_at": now_iso()}},
     )
-    # Auto-update schedule if approved (with audit trail)
     if body.status == "approved":
-        start = datetime.strptime(req["start_date"], "%Y-%m-%d").date()
-        end = datetime.strptime(req["end_date"], "%Y-%m-%d").date()
-        cur = start
-        while cur <= end:
-            key = {"user_id": req["user_id"], "date": cur.isoformat()}
-            existing = await db.schedules.find_one(key, {"_id": 0, "shift": 1})
-            doc = {**key, "shift": req["type"], "day": cur.day, "month": cur.month, "year": cur.year, "updated_at": now_iso()}
-            await db.schedules.update_one(key, {"$set": doc}, upsert=True)
-            await log_audit(req["user_id"], cur.isoformat(), (existing or {}).get("shift"),
-                            req["type"], admin, "request-approve")
-            cur += timedelta(days=1)
-    # Notify personil about admin decision (in-app + browser)
-    status_label = "disetujui" if body.status == "approved" else "ditolak"
-    await db.notifications.insert_one({
-        "id": new_id(),
-        "user_id": req["user_id"],
-        "type": f"request_{body.status}",
-        "title": f"Pengajuan {req['type']} {status_label}",
-        "message": f"Pengajuan Anda ({req['start_date']} → {req['end_date']}) telah {status_label}" + (f". Catatan: {body.admin_note}" if body.admin_note else "."),
-        "ref_id": req_id,
-        "ref_route": "/requests",
-        "read": False,
-        "created_at": now_iso(),
-    })
-    # Send email notification (non-blocking; failures logged only)
-    recipient = await db.users.find_one({"id": req["user_id"]}, {"_id": 0, "email": 1, "name": 1})
-    if recipient and recipient.get("email"):
-        subject, html = build_decision_email(
-            user_name=recipient["name"], req_type=req["type"],
-            start=req["start_date"], end=req["end_date"],
-            status=body.status, admin_note=body.admin_note or "",
-            app_name=EMAIL_FROM_NAME,
-        )
-        try:
-            await send_email(to=recipient["email"], subject=subject, html=html)
-        except Exception as e:
-            logger.error(f"Email dispatch error (non-blocking): {e}")
-    updated = await db.requests.find_one({"id": req_id}, {"_id": 0})
-    return updated
+        await _apply_approval_to_schedule(req, admin)
+    await _notify_personil_decision(req, body.status, body.admin_note or "")
+    await _dispatch_decision_email(req, body.status, body.admin_note or "")
+    return await db.requests.find_one({"id": req_id}, {"_id": 0})
 
 @api.delete("/requests/{req_id}")
 async def delete_request(req_id: str, user: dict = Depends(get_current_user)):

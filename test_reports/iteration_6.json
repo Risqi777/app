@@ -1,0 +1,20 @@
+{
+  "summary": "Iteration 6 backend regression: full pytest suite in /app/backend/tests/backend_test.py executed. Behavior identical to iter5 after cleaning stale test_conf_ seed data. All 39 tests passed (approve happy path, reject path, conflict 409 with detail.conflicts + min_active, force=true bypass, Penugasan bypass, per-day audit rows, personil notifications for approve/reject/force, GET /api/settings/public unauthenticated + branding fields, min_active PATCH, audit month/year filter, schedule summary shape).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iter6_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "decide_request refactor is clean: helpers _check_absence_conflicts / _apply_approval_to_schedule / _notify_personil_decision / _dispatch_decision_email keep behavior byte-identical. Module-level WORK_SHIFTS/ABSENCE_TYPES constants correctly used.",
+    "Personil notification insert is wrapped in try/except with logger.exception - non-blocking as intended; response still 200 when everything else succeeds (verified indirectly via passing approve/reject/force notification tests).",
+    "Test suite has known stale-data sensitivity (TEST_conf_* fixtures rely on the /personil endpoint's case-insensitive email regex to reuse users, but leftover orphan schedules from prior runs can cause TestConflictAndForce to see remaining>=min_active and return 200 instead of 409). Documented cleanup in context_for_next_testing_agent."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not tested (per request)"},
+  "test_credentials": "Admin rsqikurniawan@gmail.com / NIK 1000000001 / Admin@123 (seeded, used by fixture)",
+  "seed_data_creation": "Cleaned stale TEST Conf users, their schedules (2026-03/2026-04 Pagi), requests and notifications, plus orphan schedule rows referencing deleted users. Suite then created its own fresh users via /personil.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Before running pytest on backend_test.py, always purge stale conflict fixtures: mongosh shift_scheduler_db --eval 'const uids=db.users.find({name:{$regex:/^TEST Conf/i}}).toArray().map(u=>u.id); db.users.deleteMany({name:{$regex:/^TEST Conf/i}}); db.schedules.deleteMany({user_id:{$in:uids}}); db.requests.deleteMany({user_id:{$in:uids}}); db.notifications.deleteMany({user_id:{$in:uids}}); const valid=db.users.distinct(\"id\"); db.schedules.deleteMany({user_id:{$nin:valid}});' — otherwise TestConflictAndForce.test_b_approve_conflict_returns_409 and TestDecisionNotifiesPersonil.test_force_approve_fires_personil_notification fail with 200 instead of 409 because leftover Pagi rows on 2026-03-10 / 2026-04-10 inflate remaining active personil above min_active.",
+  "rca of the issue": "Not a product bug. TestConflictAndForce seeds 3 personil on Pagi 2026-03-10/11 and expects remaining=2 < min_active=3 → 409. Prior iteration runs leave those schedule rows behind (users get deleted or replaced next run, schedules do not). On re-run, cumulative Pagi occupancy on the same date grows (saw 4-8 rows) so conflict math yields remaining >= 3 and the API correctly returns 200. Mitigation: purge as above (documented in iter5 notes too)."
+}

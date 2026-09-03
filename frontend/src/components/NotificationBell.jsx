@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import { Bell, CheckCheck } from "lucide-react";
@@ -19,11 +19,12 @@ export default function NotificationBell({ darkContext = false }) {
   const notify = (title, body) => {
     if (typeof Notification === "undefined") return;
     if (Notification.permission === "granted") {
-      try { new Notification(title, { body, icon: "/favicon.ico", tag: "shift-scheduler" }); } catch (_) {}
+      try { new Notification(title, { body, icon: "/favicon.ico", tag: "shift-scheduler" }); }
+      catch (e) { console.warn("Browser notification failed:", e?.message); }
     }
   };
 
-  const load = async (fireBrowser = false) => {
+  const load = useCallback(async (fireBrowser = false) => {
     try {
       const { data } = await api.get("/notifications", { params: { limit: 30 } });
       setItems(data.items || []);
@@ -33,8 +34,10 @@ export default function NotificationBell({ darkContext = false }) {
         newOnes.forEach((n) => notify(n.title, n.message));
       }
       (data.items || []).forEach((n) => lastSeenIds.current.add(n.id));
-    } catch (_) {}
-  };
+    } catch (e) {
+      console.warn("Notifications fetch failed:", e?.message);
+    }
+  }, []);
 
   useEffect(() => {
     load(false);
@@ -46,17 +49,26 @@ export default function NotificationBell({ darkContext = false }) {
     const onVisible = () => { if (!document.hidden) load(true); };
     document.addEventListener("visibilitychange", onVisible);
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVisible); };
-  }, []);
+  }, [load]);
 
   const openItem = async (n) => {
     setOpen(false);
-    try { if (!n.read) await api.patch(`/notifications/${n.id}/read`); } catch (_) {}
+    try {
+      if (!n.read) await api.patch(`/notifications/${n.id}/read`);
+    } catch (e) {
+      console.warn("Mark read failed:", e?.message);
+    }
     load(false);
     if (n.ref_route) nav(n.ref_route);
   };
 
   const markAll = async () => {
-    try { await api.post("/notifications/read-all"); load(false); } catch (_) {}
+    try {
+      await api.post("/notifications/read-all");
+      load(false);
+    } catch (e) {
+      console.warn("Mark all read failed:", e?.message);
+    }
   };
 
   return (

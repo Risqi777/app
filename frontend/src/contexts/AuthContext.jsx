@@ -7,13 +7,14 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null); // null=loading, false=guest, obj=user
   const [ready, setReady] = useState(false);
 
-  const loadMe = useCallback(async () => {
+  const load = useCallback(async () => {
     const token = localStorage.getItem("token");
     if (!token) { setUser(false); setReady(true); return; }
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
-    } catch {
+    } catch (e) {
+      console.warn("Auth /me check failed, clearing token:", e?.message);
       localStorage.removeItem("token");
       setUser(false);
     } finally {
@@ -21,7 +22,9 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  useEffect(() => { loadMe(); }, [loadMe]);
+  const loadMe = load;
+
+  useEffect(() => { load(); }, [load]);
 
   const login = async (email, nik, password) => {
     const { data } = await api.post("/auth/login", { email, nik, password });

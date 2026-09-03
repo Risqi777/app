@@ -24,7 +24,9 @@ export function BrandingProvider({ children }) {
     try {
       const { data } = await axios.get(`${API}/settings/public`);
       setBranding({ ...FALLBACK, ...data });
-    } catch { /* keep fallback */ }
+    } catch (e) {
+      console.warn("Public settings fetch failed, using fallback:", e?.message);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
