@@ -4,13 +4,19 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import os
+import re
 import uuid
+import ipaddress
 import logging
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Literal
+from html import escape
+from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 import bcrypt
 import jwt
+import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
@@ -19,6 +25,137 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============= Email (Emergent-managed Resend) =============
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Shift Scheduler")
+EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
+
+_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+_CRED_ASK = ("reply with your password", "reply with the code", "send your password", "cvv",
+             "send us your password", "enter your password below", "confirm your card number",
+             "your full card number", "seed phrase", "recovery phrase", "verify your card",
+             "social security number", "confirm your bank details")
+_HOSTISH = re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
+
+def _host_ok(host: str) -> bool:
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == s or host.endswith("." + s) for s in _SHORTENERS)
+
+def _same_site(shown: str, real: str) -> bool:
+    return shown == real or real.endswith("." + shown) or shown.endswith("." + real)
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags, self.urls, self.anchors = set(), [], []
+        self._href, self._text = None, []
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k, v in attrs if k.lower() in ("href", "src") and v]
+        if tag.lower() == "a":
+            self._href = dict((k.lower(), v) for k, v in attrs).get("href")
+            self._text = []
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.anchors.append((self._href, "".join(self._text)))
+            self._href, self._text = None, []
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan(); scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("No forms or input fields in email (G2)")
+    body = f"{subject}\n{html}".lower()
+    for p in _CRED_ASK:
+        if p in body:
+            raise ValueError(f"Email asks the recipient for credentials: {p!r} (G2)")
+    for url in scan.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        if not low.startswith("https://"):
+            raise ValueError(f"Email links/assets must be absolute https: {url!r} (G3)")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError(f"Shortened, numeric-host or credential-bearing URL: {url!r} (G3)")
+    for href, text in scan.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real:
+            continue
+        for m in _HOSTISH.finditer(text):
+            if not _same_site(m.group(1).lower(), real):
+                raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
+
+async def send_email(*, to: str, subject: str, html: str) -> Optional[str]:
+    if not EMAIL_KEY:
+        logger.warning("EMERGENT_EMAIL_KEY missing, skipping email send")
+        return None
+    _assert_safe_email(subject, html)
+    payload = {"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME}
+    if EMAIL_REPLY_TO:
+        payload["contact_email"] = EMAIL_REPLY_TO
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(f"{EMAIL_BASE_URL}/api/v1/email/send",
+                             headers={"X-Email-Key": EMAIL_KEY}, json=payload)
+        r.raise_for_status()
+        return r.json().get("id")
+    except Exception as e:
+        logger.error(f"Email send failed: {e}")
+        return None
+
+def build_decision_email(user_name: str, req_type: str, start: str, end: str,
+                         status: str, admin_note: str, app_name: str) -> tuple[str, str]:
+    status_id = "DISETUJUI" if status == "approved" else "DITOLAK"
+    color = "#059669" if status == "approved" else "#DC2626"
+    subject = f"[{app_name}] Pengajuan {req_type} {status_id}"
+    note_row = (f'<tr><td style="padding:6px 0;color:#475569">Catatan Admin</td>'
+                f'<td style="padding:6px 0;color:#0f172a"><strong>{escape(admin_note)}</strong></td></tr>'
+                if admin_note else "")
+    html = (
+        '<table role="presentation" width="100%" style="background:#f8fafc;padding:24px 0">'
+        '<tr><td align="center">'
+        '<table role="presentation" width="560" style="background:#ffffff;border-radius:12px;'
+        'border:1px solid #e2e8f0;font-family:Arial,sans-serif;color:#0f172a">'
+        f'<tr><td style="padding:20px 28px;border-bottom:1px solid #e2e8f0">'
+        f'<div style="font-size:12px;color:#64748b;letter-spacing:2px;text-transform:uppercase">'
+        f'{escape(app_name)}</div>'
+        f'<div style="font-size:20px;font-weight:800;margin-top:4px">Notifikasi Pengajuan</div>'
+        f'</td></tr>'
+        f'<tr><td style="padding:24px 28px">'
+        f'<p style="margin:0 0 12px 0">Halo <strong>{escape(user_name)}</strong>,</p>'
+        f'<p style="margin:0 0 16px 0">Pengajuan Anda telah diproses dengan status:</p>'
+        f'<div style="display:inline-block;padding:8px 14px;border-radius:999px;'
+        f'background:{color}15;color:{color};font-weight:700;letter-spacing:1px">{status_id}</div>'
+        f'<table role="presentation" width="100%" style="margin-top:20px;font-size:14px">'
+        f'<tr><td style="padding:6px 0;color:#475569;width:40%">Jenis</td>'
+        f'<td style="padding:6px 0"><strong>{escape(req_type)}</strong></td></tr>'
+        f'<tr><td style="padding:6px 0;color:#475569">Tanggal Mulai</td>'
+        f'<td style="padding:6px 0"><strong>{escape(start)}</strong></td></tr>'
+        f'<tr><td style="padding:6px 0;color:#475569">Tanggal Selesai</td>'
+        f'<td style="padding:6px 0"><strong>{escape(end)}</strong></td></tr>'
+        f'{note_row}'
+        f'</table>'
+        f'<p style="margin:24px 0 0 0;color:#475569;font-size:13px">'
+        f'Silakan masuk ke aplikasi untuk melihat jadwal terbaru Anda.</p>'
+        f'</td></tr>'
+        f'<tr><td style="padding:16px 28px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8">'
+        f'Email otomatis dari {escape(app_name)}. Kami tidak pernah meminta password atau data '
+        f'kartu melalui email.'
+        f'</td></tr>'
+        '</table></td></tr></table>'
+    )
+    return subject, html
 
 # MongoDB
 mongo_url = os.environ['MONGO_URL']
@@ -276,12 +413,29 @@ async def get_schedule(month: int, year: int, user: dict = Depends(get_current_u
     ).to_list(10000)
     return docs
 
+async def log_audit(user_id: str, target_date: str, before: Optional[str], after: str,
+                    changed_by: dict, source: str):
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1})
+    await db.schedule_audit.insert_one({
+        "id": new_id(),
+        "user_id": user_id,
+        "user_name": (target_user or {}).get("name", ""),
+        "date": target_date,
+        "shift_before": before,
+        "shift_after": after,
+        "changed_by": changed_by["id"],
+        "changed_by_name": changed_by["name"],
+        "source": source,  # manual / generate / request-approve
+        "changed_at": now_iso(),
+    })
+
 @api.post("/schedule/cell")
 async def upsert_cell(body: CellUpdateIn, admin: dict = Depends(require_admin)):
     if body.shift not in SHIFT_CODES:
         raise HTTPException(status_code=400, detail="Shift tidak valid")
     d = datetime.strptime(body.date, "%Y-%m-%d").date()
     key = {"user_id": body.user_id, "date": body.date}
+    existing = await db.schedules.find_one(key, {"_id": 0, "shift": 1})
     doc = {
         **key,
         "shift": body.shift,
@@ -291,7 +445,18 @@ async def upsert_cell(body: CellUpdateIn, admin: dict = Depends(require_admin)):
         "updated_at": now_iso(),
     }
     await db.schedules.update_one(key, {"$set": doc}, upsert=True)
+    await log_audit(body.user_id, body.date, (existing or {}).get("shift"), body.shift, admin, "manual")
     return doc
+
+@api.get("/schedule/audit")
+async def get_audit(month: Optional[int] = None, year: Optional[int] = None,
+                    limit: int = 200, user: dict = Depends(require_admin)):
+    q = {}
+    if month and year:
+        prefix = f"{year:04d}-{month:02d}-"
+        q["date"] = {"$regex": f"^{prefix}"}
+    docs = await db.schedule_audit.find(q, {"_id": 0}).sort("changed_at", -1).to_list(limit)
+    return docs
 
 @api.post("/schedule/generate")
 async def generate_schedule(body: GenerateIn, admin: dict = Depends(require_admin)):
@@ -368,16 +533,32 @@ async def decide_request(req_id: str, body: RequestDecisionIn, admin: dict = Dep
         {"id": req_id},
         {"$set": {"status": body.status, "admin_note": body.admin_note or "", "decided_at": now_iso()}},
     )
-    # Auto-update schedule if approved
+    # Auto-update schedule if approved (with audit trail)
     if body.status == "approved":
         start = datetime.strptime(req["start_date"], "%Y-%m-%d").date()
         end = datetime.strptime(req["end_date"], "%Y-%m-%d").date()
         cur = start
         while cur <= end:
             key = {"user_id": req["user_id"], "date": cur.isoformat()}
+            existing = await db.schedules.find_one(key, {"_id": 0, "shift": 1})
             doc = {**key, "shift": req["type"], "day": cur.day, "month": cur.month, "year": cur.year, "updated_at": now_iso()}
             await db.schedules.update_one(key, {"$set": doc}, upsert=True)
+            await log_audit(req["user_id"], cur.isoformat(), (existing or {}).get("shift"),
+                            req["type"], admin, "request-approve")
             cur += timedelta(days=1)
+    # Send email notification (non-blocking; failures logged only)
+    recipient = await db.users.find_one({"id": req["user_id"]}, {"_id": 0, "email": 1, "name": 1})
+    if recipient and recipient.get("email"):
+        subject, html = build_decision_email(
+            user_name=recipient["name"], req_type=req["type"],
+            start=req["start_date"], end=req["end_date"],
+            status=body.status, admin_note=body.admin_note or "",
+            app_name=EMAIL_FROM_NAME,
+        )
+        try:
+            await send_email(to=recipient["email"], subject=subject, html=html)
+        except Exception as e:
+            logger.error(f"Email dispatch error (non-blocking): {e}")
     updated = await db.requests.find_one({"id": req_id}, {"_id": 0})
     return updated
 
