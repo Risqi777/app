@@ -30,70 +30,70 @@
     "border_dark": "#334155",
     "shift_badge_colors": {
       "pagi": {
-        "label": "Shift Pagi (07.00 - 13.00)",
+        "label": "Shift Pagi (07.00-13.00)",
         "code": "Pagi",
         "bg_light": "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700",
-        "hex": "#D97706"
+        "hex": "#e0f75e"
       },
       "siang": {
-        "label": "Shift Siang (13.00 - 19.00)",
+        "label": "Shift Siang (13.00-19.00)",
         "code": "Siang",
         "bg_light": "bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-700",
-        "hex": "#0284C7"
+        "hex": "#09b1e4"
       },
       "malam": {
-        "label": "Shift Malam (19.00 - 07.00)",
+        "label": "Shift Malam (19.00-07.00)",
         "code": "Malam",
         "bg_light": "bg-indigo-100 text-indigo-900 border-indigo-300 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-700",
-        "hex": "#4F46E5"
+        "hex": "#e37b04"
       },
       "libur": {
         "label": "Libur (Off)",
         "code": "Libur",
         "bg_light": "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700",
-        "hex": "#16A34A"
+        "hex": "#540606"
       },
       "cuti_tahunan": {
         "label": "Cuti Tahunan",
-        "code": "Cuti",
+        "code": "Cuti Tahunan",
         "bg_light": "bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700",
-        "hex": "#E11D48"
+        "hex": "#f56492"
       },
       "cuti_penting": {
         "label": "Cuti Penting",
-        "code": "C. Penting",
+        "code": "Cuti Penting",
         "bg_light": "bg-pink-100 text-pink-900 border-pink-300 dark:bg-pink-950/60 dark:text-pink-300 dark:border-pink-700",
-        "hex": "#DB2777"
+        "hex": "#ec2f84"
       },
       "cuti_besar": {
         "label": "Cuti Besar",
-        "code": "C. Besar",
+        "code": "Cuti Besar",
         "bg_light": "bg-purple-100 text-purple-900 border-purple-300 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-700",
-        "hex": "#9333EA"
+        "hex": "#9228f4"
       },
       "sakit": {
         "label": "Sakit",
         "code": "Sakit",
         "bg_light": "bg-orange-100 text-orange-900 border-orange-300 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-700",
-        "hex": "#EA580C"
+        "hex": "#113cb0"
       },
       "dinas_luar": {
         "label": "Dinas Luar",
         "code": "Dinas",
         "bg_light": "bg-teal-100 text-teal-900 border-teal-300 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-700",
-        "hex": "#0D9488"
+        "hex": "#11cdbd"
       },
       "diklat": {
         "label": "Diklat",
         "code": "Diklat",
         "bg_light": "bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-cyan-950/60 dark:text-cyan-300 dark:border-cyan-700",
-        "hex": "#0891B2"
+        "hex": "#2db208"
       },
       "penugasan": {
         "label": "Penugasan",
         "code": "Tugas",
         "bg_light": "bg-slate-200 text-slate-900 border-slate-400 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600",
-        "hex": "#475569"
+        "hex": "#224e00"
       }
     }
   },
